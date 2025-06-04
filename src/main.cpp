@@ -7,6 +7,9 @@
 const char *ssid = "I-Soft";          // Replace with your network SSID
 const char *password = "i-soft@2023"; // Replace with your network password
 WiFiServer* tcpServer = nullptr;
+WiFiClient tcpClient;   // dùng khi ESP là client
+bool isTCPClientConnected = false;
+
 
 // put function declarations here:
 const char index_html[] PROGMEM = R"rawliteral(
@@ -250,11 +253,12 @@ void serialHandler() {
           else if (role == "client") {
           if (status == "connect") {
             currentRole = "client";
-            Serial.println("Client IP: " + ip);
-            Serial.println("Client Port: " + port);
+            Serial.println("Server IP: " + ip);
+            Serial.println("Server Port: " + port);
             // Thiết lập client TCP
             WiFiClient client;
-            if (client.connect(ip.c_str(), port)) {
+            if (tcpClient.connect(ip.c_str(), port)) {
+              isTCPClientConnected = true;
               Serial.println("Connected to server at " + ip + ":" + String(port));
               client.println("i am TCP client");
             } else {
@@ -262,16 +266,48 @@ void serialHandler() {
             }
           } 
           else if (status == "disconnect") {
-            WiFiClient client;
-            client.stop();
-            Serial.println("Disconnecting from server");
+            if (tcpClient.connected()) {
+              tcpClient.stop();
+              isTCPClientConnected = false;
+              Serial.println("Disconnecting from server");
+            }
           }      
     }
   }
 }
 }
 
+void handleTCPServerResponse() {
 
+  if (isTCPClientConnected && tcpClient.connected()) {
+    while (tcpClient.available()) {
+      String serverMsg = tcpClient.readStringUntil('\n');
+      Serial.println("Received from server: " + serverMsg);
+      StaticJsonDocument<200> doc1 = parseClientJson(serverMsg);
+      String role = doc1["role"] | "";
+      String status = doc1["status"] | "";
+      String data = doc1["data"] | "";
+
+      if (role == "server") {
+        Serial.println("Server role confirmed");
+        if (status == "disconnect") {
+          Serial.println("Server requested disconnect");
+          tcpClient.stop();
+          isTCPClientConnected = false;
+          Serial.println("Disconnected from server");
+          return; // Thoát khỏi hàm nếu server yêu cầu ngắt kết nối
+        } else if (data.length() > 0) {
+          Serial.println("Server data: " + data);
+        } else {
+          Serial.println("No data received from server");
+        }
+      } else {
+        Serial.println("Invalid role from server: " + role);
+      }
+      // Xử lý logic với serverMsg tại đây nếu muốn
+    }
+  }
+}
 
 void setup()
 {
@@ -304,8 +340,10 @@ void loop()
   // WiFiClient client = tcpServer.available();
   // if (client) {
   // }
+  
   handleTCPclient();
   serialHandler(); 
+  handleTCPServerResponse();
 
 }
 
